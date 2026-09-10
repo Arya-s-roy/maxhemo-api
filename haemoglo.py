@@ -44,7 +44,7 @@ print(f"R² Score: {r2_score(y_test, y_pred):.4f}")
 print(f"MAE:      {mean_absolute_error(y_test, y_pred):.4f} g/dL")
 print(f"RMSE:     {np.sqrt(mean_squared_error(y_test, y_pred)):.4f} g/dL")
 
-# 7. Overwrite saved artifacts
+# 7. Overwrite saved artifacts (loaded by main.py at API startup)
 joblib.dump(model, "tcs34725_hb_model.pkl")
 joblib.dump(scaler, "tcs34725_scaler.pkl")
 print("\nUpdated Model and Scaler saved!")

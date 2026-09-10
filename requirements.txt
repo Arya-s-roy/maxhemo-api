@@ -1,0 +1,9 @@
+# Pinned to the exact versions the .pkl artifacts were trained with -
+# sklearn/xgboost pickles are not guaranteed compatible across versions.
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+scikit-learn==1.9.0
+xgboost==3.4.1
+pandas==3.0.5
+numpy==2.5.3
+joblib==1.6.0

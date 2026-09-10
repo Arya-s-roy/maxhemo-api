@@ -1,95 +1,32 @@
-from hb_features import HbFeatureEngineer
 from pathlib import Path
 
 import joblib
-import numpy as np
 import pandas as pd
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from sklearn.base import BaseEstimator, TransformerMixin
+# IMPORTANT:
+# HbFeatureEngineer is stored inside the trained .pkl pipeline.
+# This import must exist before joblib.load().
+from hb_features import HbFeatureEngineer
 
 
-# ============================================================
-# CUSTOM FEATURE ENGINEERING
-# ============================================================
-
-class HbFeatureEngineer(BaseEstimator, TransformerMixin):
-
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X):
-        X = X.copy()
-
-        # Gender encoding
-        X["Gender"] = X["Gender"].map({
-            "Male": 1,
-            "Female": 0
-        })
-
-        # Engineered features
-        X["IR_Red_Ratio"] = (
-            X["Infra Red (a.u)"] / X["Red (a.u)"]
-        )
-
-        X["Red_IR_Ratio"] = (
-            X["Red (a.u)"] / X["Infra Red (a.u)"]
-        )
-
-        X["IR_Red_Diff"] = (
-            X["Infra Red (a.u)"] - X["Red (a.u)"]
-        )
-
-        X["IR_Red_Sum"] = (
-            X["Infra Red (a.u)"] + X["Red (a.u)"]
-        )
-
-        X["Normalized_Difference"] = (
-            (X["Infra Red (a.u)"] - X["Red (a.u)"]) /
-            (X["Infra Red (a.u)"] + X["Red (a.u)"])
-        )
-
-        X["Log_IR_Red_Ratio"] = np.log(
-            X["Infra Red (a.u)"] / X["Red (a.u)"]
-        )
-
-        return X
-
-
-# ============================================================
-# LOAD MODEL
-# ============================================================
-
-MODEL_PATH = Path(__file__).parent / "hemoglobin_xgb_pipeline.pkl"
-
-try:
-    model = joblib.load(MODEL_PATH)
-    MODEL_LOADED = True
-    MODEL_ERROR = None
-
-except Exception as e:
-    model = None
-    MODEL_LOADED = False
-    MODEL_ERROR = str(e)
-
-
-# ============================================================
+# =========================================================
 # FASTAPI APPLICATION
-# ============================================================
+# =========================================================
 
 app = FastAPI(
-    title="MAX30102 Hemoglobin Estimation API",
-    description="Hemoglobin prediction using Red + Infra Red PPG readings, age and gender.",
+    title="Hemoglobin Estimation API",
+    description="Hemoglobin prediction using MAX30102 Red + IR PPG data",
     version="1.0.0"
 )
 
 
-# ============================================================
+# =========================================================
 # CORS
-# ============================================================
+# =========================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,9 +37,28 @@ app.add_middleware(
 )
 
 
-# ============================================================
-# REQUEST MODEL
-# ============================================================
+# =========================================================
+# MODEL LOADING
+# =========================================================
+
+MODEL_PATH = Path(__file__).parent / "hemoglobin_xgb_pipeline.pkl"
+
+model = None
+MODEL_LOADED = False
+
+try:
+    model = joblib.load(MODEL_PATH)
+    MODEL_LOADED = True
+    print("Hemoglobin XGBoost model loaded successfully.")
+
+except Exception as e:
+    print("ERROR: Could not load hemoglobin model.")
+    print(e)
+
+
+# =========================================================
+# REQUEST DATA MODEL
+# =========================================================
 
 class PredictRequest(BaseModel):
 
@@ -133,26 +89,9 @@ class PredictRequest(BaseModel):
     )
 
 
-# ============================================================
-# RESPONSE MODEL
-# ============================================================
-
-class PredictResponse(BaseModel):
-
-    predicted_hb_g_dl: float
-    gender: str
-    age: int
-
-    red: float
-    ir: float
-
-    anemia_classification: str
-    warning: str | None
-
-
-# ============================================================
+# =========================================================
 # ROOT ENDPOINT
-# ============================================================
+# =========================================================
 
 @app.get("/")
 def root():
@@ -165,44 +104,43 @@ def root():
     }
 
 
-# ============================================================
+# =========================================================
 # HEALTH CHECK
-# ============================================================
+# =========================================================
 
 @app.get("/health")
 def health():
 
-    if MODEL_LOADED:
-
-        return {
-            "status": "healthy",
-            "model_loaded": True
-        }
-
     return {
-        "status": "error",
-        "model_loaded": False,
-        "error": MODEL_ERROR
+        "status": "healthy",
+        "model_loaded": MODEL_LOADED
     }
 
 
-# ============================================================
+# =========================================================
 # MODEL INFORMATION
-# ============================================================
+# =========================================================
 
 @app.get("/model-info")
 def model_info():
 
     return {
-        "model_loaded": MODEL_LOADED,
-        "model_type": "XGBoost Regressor",
-        "sensor": "MAX30102",
-        "raw_inputs": [
-            "Red (a.u)",
-            "Infra Red (a.u)",
-            "Gender",
-            "Age (year)"
-        ],
+        "model": "XGBoost Regressor",
+        "input_sensor": "MAX30102",
+        "prediction_unit": "g/dL",
+
+        "inputs": {
+            "red": "MAX30102 Red value",
+            "ir": "MAX30102 Infra Red value",
+            "age": "Age in years",
+            "gender": "1 = Male, 0 = Female"
+        },
+
+        "gender_encoding": {
+            "Male": 1,
+            "Female": 0
+        },
+
         "engineered_features": [
             "IR_Red_Ratio",
             "Red_IR_Ratio",
@@ -210,73 +148,153 @@ def model_info():
             "IR_Red_Sum",
             "Normalized_Difference",
             "Log_IR_Red_Ratio"
-        ]
+        ],
+
+        "output": "Predicted Hemoglobin"
     }
 
 
-# ============================================================
-# ANEMIA CLASSIFICATION
-# ============================================================
+# =========================================================
+# HEMOGLOBIN CLASSIFICATION
+# =========================================================
 
 def classify_hemoglobin(hb: float, gender: int) -> str:
 
+    # Male
     if gender == 1:
-        # Male
+
         if hb >= 13:
             return "Normal"
+
         elif hb >= 11:
             return "Mild Anemia"
+
         elif hb >= 8:
             return "Moderate Anemia"
+
         else:
             return "Severe Anemia"
 
+    # Female
     else:
-        # Female
+
         if hb >= 12:
             return "Normal"
+
         elif hb >= 11:
             return "Mild Anemia"
+
         elif hb >= 8:
             return "Moderate Anemia"
+
         else:
             return "Severe Anemia"
 
 
-# ============================================================
+# =========================================================
 # PREDICTION ENDPOINT
-# ============================================================
+# =========================================================
 
-@app.post("/predict", response_model=PredictResponse)
+@app.post("/predict")
 def predict(request: PredictRequest):
 
-    if not MODEL_LOADED:
+    # -----------------------------------------------------
+    # Check model
+    # -----------------------------------------------------
+
+    if not MODEL_LOADED or model is None:
 
         raise HTTPException(
             status_code=500,
-            detail=f"Model could not be loaded: {MODEL_ERROR}"
+            detail="Hemoglobin model is not loaded."
         )
-
-    # Convert 1/0 to the gender names used during training
-    gender_name = "Male" if request.gender == 1 else "Female"
-
-    # Create input using EXACT column names used during training
-    input_data = pd.DataFrame([
-        {
-            "Red (a.u)": request.red,
-            "Infra Red (a.u)": request.ir,
-            "Gender": gender_name,
-            "Age (year)": request.age
-        }
-    ])
 
     try:
 
-        # Pipeline performs feature engineering,
-        # imputation and XGBoost prediction
+        # -------------------------------------------------
+        # Convert gender number to training dataset format
+        # -------------------------------------------------
+
+        if request.gender == 1:
+            gender_text = "Male"
+        else:
+            gender_text = "Female"
+
+        # -------------------------------------------------
+        # Create input dataframe
+        #
+        # These column names MUST match the training dataset.
+        # -------------------------------------------------
+
+        input_data = pd.DataFrame([
+            {
+                "Red (a.u)": request.red,
+                "Infra Red (a.u)": request.ir,
+                "Gender": gender_text,
+                "Age (year)": request.age
+            }
+        ])
+
+        # -------------------------------------------------
+        # Make prediction
+        #
+        # The saved pipeline handles:
+        #
+        # 1. Gender encoding
+        # 2. Feature engineering
+        # 3. Missing-value handling
+        # 4. XGBoost prediction
+        #
+        # Do NOT manually calculate the engineered features
+        # here.
+        # -------------------------------------------------
+
         prediction = model.predict(input_data)
 
         hb = float(prediction[0])
+
+        # -------------------------------------------------
+        # Classification
+        # -------------------------------------------------
+
+        classification = classify_hemoglobin(
+            hb,
+            request.gender
+        )
+
+        # -------------------------------------------------
+        # Warning
+        # -------------------------------------------------
+
+        warning = None
+
+        if hb < 4 or hb > 20:
+
+            warning = (
+                "Predicted hemoglobin is outside the expected "
+                "range. Please verify the sensor readings and "
+                "consider laboratory confirmation."
+            )
+
+        # -------------------------------------------------
+        # Return response
+        # -------------------------------------------------
+
+        return {
+            "predicted_hb_g_dl": round(hb, 2),
+
+            "gender": gender_text,
+
+            "age": request.age,
+
+            "red": request.red,
+
+            "ir": request.ir,
+
+            "anemia_classification": classification,
+
+            "warning": warning
+        }
 
     except Exception as e:
 
@@ -284,44 +302,3 @@ def predict(request: PredictRequest):
             status_code=500,
             detail=f"Prediction failed: {str(e)}"
         )
-
-    # Classification
-    classification = classify_hemoglobin(
-        hb,
-        request.gender
-    )
-
-    # Warning for unusual prediction
-    warning = None
-
-    if hb < 4:
-        warning = "Very low hemoglobin prediction. Verify sensor reading."
-
-    elif hb > 20:
-        warning = "Very high hemoglobin prediction. Verify sensor reading."
-
-    return {
-        "predicted_hb_g_dl": round(hb, 2),
-        "gender": gender_name,
-        "age": request.age,
-        "red": request.red,
-        "ir": request.ir,
-        "anemia_classification": classification,
-        "warning": warning
-    }
-
-
-# ============================================================
-# RUN LOCALLY
-# ============================================================
-
-if __name__ == "__main__":
-
-    import uvicorn
-
-    uvicorn.run(
-        "main:app",
-        host="127.0.0.1",
-        port=8000,
-        reload=True
-    )

@@ -1,5 +1,6 @@
 services:
   - type: web
+<<<<<<< HEAD
     name: hemoglobin-xgboost-api
     runtime: python
     plan: free
@@ -11,3 +12,13 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.13.4"
+=======
+    name: tcs34725-hb-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.13.4"
+>>>>>>> 0ec2654823e7a8e1d56894eab5af5fad537b6f12

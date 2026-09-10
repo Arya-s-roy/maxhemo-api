@@ -1,5 +1,4 @@
 
-=======
 # Pinned to the exact versions the .pkl artifacts were trained with -
 # sklearn/xgboost pickles are not guaranteed compatible across versions.
 fastapi==0.141.1
